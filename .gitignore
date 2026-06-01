@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Whisper model cache (downloaded automatically, big)
+*.bin
+*.pt
+models/
+.cache/
+
+# Secrets (if you add a cloud API key later)
+.env
+*.key
+
+# macOS
+.DS_Store
