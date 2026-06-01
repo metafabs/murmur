@@ -146,6 +146,14 @@ def stop_recording_and_process():
         log("empty transcription.")
         return
 
+    # Heads-up on long inputs: cleanup quality degrades and latency climbs as the
+    # transcript grows. ~750 words (~1000 tokens) is a comfortable ceiling for the
+    # 8B model with num_ctx=8192. Beyond that, consider dictating in shorter bursts.
+    word_count = len(raw.split())
+    if word_count > 750:
+        log(f"⚠ long transcript ({word_count} words) — cleanup may be slow or "
+            f"truncated. If output looks cut off, dictate in shorter bursts.")
+
     final = raw
     if CLEANUP_ENABLED:
         try:
@@ -184,9 +192,9 @@ def cleanup(transcript: str) -> str:
         "model": OLLAMA_MODEL,
         "prompt": CLEANUP_PROMPT.format(transcript=transcript),
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": 0.2, "num_ctx": 8192},
     }
-    r = requests.post(OLLAMA_URL, json=payload, timeout=60)
+    r = requests.post(OLLAMA_URL, json=payload, timeout=300)
     r.raise_for_status()
     return r.json()["response"].strip()
 
