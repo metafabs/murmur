@@ -66,7 +66,7 @@ ollama pull llama3.1:8b
 
 ```bash
 source .venv/bin/activate
-python murmur.py
+python3 murmur.py
 ```
 
 **Hold Right-Option, speak, release. Press Cmd-V to paste.** Esc to quit.
@@ -74,6 +74,25 @@ python murmur.py
 First run downloads the Whisper model and asks for **Microphone** + **Input
 Monitoring** and **Accessibility** permissions (System Settings ->
 Privacy & Security). Grant them, then quit and rerun once.
+
+### Optional: launch with a one-word command
+
+Tired of typing the two startup lines each time? Add a shell alias so you can
+just type `murmur` from anywhere. For zsh (the macOS default):
+
+```bash
+echo 'alias murmur="cd ~/murmur && source .venv/bin/activate && python3 murmur.py"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Now just run:
+
+```bash
+murmur
+```
+
+(Adjust the path if you cloned Murmur somewhere other than `~/murmur`. Note the
+alias uses `python3`, not `python` — macOS venvs expose only `python3`.)
 
 ## Tuning
 
