@@ -48,6 +48,11 @@ hold hotkey -> record mic -> faster-whisper (local) -> LLM cleanup (local) -> cl
 ## Setup
 
 ```bash
+# get the code — start from home so the alias below works unedited
+cd ~
+git clone https://github.com/metafabs/murmur.git
+cd murmur
+
 # system audio lib
 brew install portaudio
 
@@ -58,7 +63,8 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# local cleanup model (~5 GB, one-time)
+# local cleanup model (~5 GB, one-time download — it's a full AI model that
+# runs entirely on your Mac, so give it a few minutes)
 ollama pull llama3.1:8b
 ```
 
@@ -71,8 +77,8 @@ python3 murmur.py
 
 **Hold Right-Option, speak, release. Press Cmd-V to paste.** Esc to quit.
 
-First run downloads the Whisper model and asks for **Microphone** + **Input
-Monitoring** and **Accessibility** permissions (System Settings ->
+First run downloads the Whisper transcription model (~500 MB, one-time) and asks
+for **Microphone** + **Input Monitoring** and **Accessibility** permissions (System Settings ->
 Privacy & Security). Grant them, then quit and rerun once.
 
 ### Optional: launch with a one-word command
