@@ -18,6 +18,7 @@ import sys
 import time
 import threading
 import queue
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -49,6 +50,7 @@ WHISPER_LANGUAGE = "en"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.1:8b"   # or "qwen2.5:7b" — pull it first: `ollama pull llama3.1:8b`
 CLEANUP_ENABLED = True         # set False to test raw transcription only (Phase 1)
+MIN_PYTHON = (3, 10)           # Python 3.12 is recommended for setup; 3.10+ is required
 
 # THE SECRET SAUCE. Tune this. This is where 80% of output quality lives.
 CLEANUP_PROMPT = """You are a dictation cleanup tool. You receive a raw speech-to-text \
@@ -80,6 +82,81 @@ _model = None
 
 def log(msg: str):
     print(f"[murmur] {msg}", flush=True)
+
+
+def fail(msg: str, fix: str | None = None, code: int = 1):
+    """Print a human-readable setup error and exit."""
+    log(f"setup error: {msg}")
+    if fix:
+        print()
+        print(fix.strip())
+        print()
+    sys.exit(code)
+
+
+def preflight_checks():
+    """Catch the common install mistakes before Whisper starts loading."""
+    if sys.version_info < MIN_PYTHON:
+        fail(
+            f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required; found {sys.version.split()[0]}.",
+            """
+Fix:
+  cd ~/murmur
+  rm -rf .venv
+  brew install python@3.12
+  python3.12 -m venv .venv
+  .venv/bin/python -m pip install --upgrade pip
+  .venv/bin/python -m pip install -r requirements.txt
+  .venv/bin/python murmur.py
+""",
+        )
+
+    exe = Path(sys.executable).resolve()
+    project_root = Path(__file__).resolve().parent
+    expected_venv = project_root / ".venv"
+    if expected_venv.exists() and expected_venv not in exe.parents:
+        log(f"warning: Murmur is running with {exe}")
+        log(f"warning: expected the project venv at {expected_venv}")
+        log("warning: run with '.venv/bin/python murmur.py' to avoid Python version drift.")
+
+    if not CLEANUP_ENABLED:
+        return
+
+    try:
+        r = requests.get("http://localhost:11434/api/tags", timeout=3)
+        r.raise_for_status()
+    except requests.exceptions.RequestException:
+        fail(
+            "Ollama is not reachable at http://localhost:11434.",
+            """
+Fix:
+  open -a Ollama
+
+Then, in a new Terminal window:
+  ollama pull llama3.1:8b
+  cd ~/murmur
+  .venv/bin/python murmur.py
+""",
+        )
+
+    try:
+        models = r.json().get("models", [])
+        names = {m.get("name") for m in models}
+    except ValueError:
+        names = set()
+
+    if OLLAMA_MODEL not in names:
+        fail(
+            f"Ollama is running, but model '{OLLAMA_MODEL}' is not installed.",
+            f"""
+Fix:
+  ollama pull {OLLAMA_MODEL}
+
+Then run Murmur again:
+  cd ~/murmur
+  .venv/bin/python murmur.py
+""",
+        )
 
 
 def load_model():
@@ -241,6 +318,7 @@ def print_banner():
 
 
 def main():
+    preflight_checks()
     print_banner()
     load_model()
     print()
