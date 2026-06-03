@@ -11,109 +11,202 @@ No cloud, no subscription, no audio leaving your computer.
 
 ---
 
-## Why this exists
-
-Cloud dictation apps are excellent but they send your voice to someone else's
-servers and charge a monthly fee. Murmur does the two things those apps do —
-transcribe speech and clean it up (remove the "um"s, false starts, fix grammar) —
-but **100% locally**:
-
-- **Private** — audio and text never leave your machine.
-- **Free** — open source, MIT licensed.
-- **Works in any app** — the cleaned text lands on your clipboard; paste with Cmd-V.
-
-It's intentionally simple. The one tradeoff (manual paste instead of
-auto-insert-anywhere) is what keeps it a small, hackable, ~220-line script
-instead of a sprawling project.
-
-## How it works
+## What Murmur does
 
 ```
-hold hotkey -> record mic -> faster-whisper (local) -> LLM cleanup (local) -> clipboard -> Cmd-V
+hold hotkey -> record mic -> faster-whisper locally -> Ollama cleanup locally -> clipboard -> Cmd-V
 ```
 
 - **Transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper), local.
-- **Cleanup:** a local LLM via [Ollama](https://ollama.com) — removes fillers,
-  fixes grammar, keeps your meaning. This is the part you'd otherwise pay for.
+- **Cleanup:** a local LLM via [Ollama](https://ollama.com), local.
+- **Output:** cleaned text is copied to your clipboard. You paste it with Cmd-V.
 
-> **Models are not bundled.** You install Ollama and pull a model yourself;
-> Whisper downloads its model on first run. Murmur ships only the glue code.
+The deliberate tradeoff: Murmur does **not** auto-type into every app. Manual paste
+keeps the project small, debuggable, and less fragile.
 
 ## Requirements
 
-- macOS (Apple Silicon recommended)
-- Python 3.10+
-- [Homebrew](https://brew.sh), [Ollama](https://ollama.com)
+- macOS, Apple Silicon recommended
+- [Homebrew](https://brew.sh)
+- [Ollama](https://ollama.com)
+- Python **3.12 recommended**
 
-## Setup
+Murmur works with modern Python 3 versions, but the recommended install pins the
+virtual environment to `python3.12`. This avoids a common macOS problem where
+`python3` later points to a different interpreter after a system or Homebrew update.
+
+## Developer setup
+
+Start from your home folder so the alias below works unchanged.
 
 ```bash
-# get the code — start from home so the alias below works unedited
 cd ~
 git clone https://github.com/metafabs/murmur.git
 cd murmur
+```
 
-# system audio lib
+Install system dependencies:
+
+```bash
 brew install portaudio
+brew install python@3.12
+```
 
-# python env — use a 3.10+ interpreter explicitly.
-# macOS ships an old system python3 (3.9); if `python3 --version` shows 3.9,
-# install a newer one (`brew install python@3.12`) and use it by name:
+Create a project-local Python environment with a specific interpreter:
+
+```bash
 python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
 
-# local cleanup model (~5 GB, one-time download — it's a full AI model that
-# runs entirely on your Mac, so give it a few minutes)
+Why this matters: always using `.venv/bin/python` means Murmur runs with the
+same isolated Python environment every time instead of whatever `python3` happens
+to mean on your Mac that day.
+
+Install and start Ollama:
+
+```bash
+brew install --cask ollama
+open -a Ollama
+```
+
+Then pull the cleanup model:
+
+```bash
 ollama pull llama3.1:8b
 ```
 
 ## Run
 
 ```bash
-source .venv/bin/activate
-python3 murmur.py
+cd ~/murmur
+.venv/bin/python murmur.py
 ```
 
-**Hold Right-Option, speak, release. Press Cmd-V to paste.** Esc to quit.
+Hold **Right Option**, speak, release. When Murmur says the text is on your
+clipboard, paste with **Cmd-V**. Press **Esc** to quit.
 
-First run downloads the Whisper transcription model (~500 MB, one-time) and asks
-for **Microphone** + **Input Monitoring** and **Accessibility** permissions (System Settings ->
-Privacy & Security). Grant them, then quit and rerun once.
+On first launch, Murmur downloads the Whisper transcription model. macOS may ask
+for privacy permissions. Grant your Terminal app:
 
-### Optional: launch with a one-word command
+- Microphone
+- Input Monitoring
+- Accessibility
 
-Tired of typing the two startup lines each time? Add a shell alias so you can
-just type `murmur` from anywhere. For zsh (the macOS default):
+Find these in **System Settings -> Privacy & Security**. After changing permissions,
+quit Terminal and run Murmur again.
+
+## Optional: launch with one word
 
 ```bash
-echo 'alias murmur="cd ~/murmur && source .venv/bin/activate && python3 murmur.py"' >> ~/.zshrc
+echo 'alias murmur="cd ~/murmur && .venv/bin/python murmur.py"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-Now just run:
+Now you can run:
 
 ```bash
 murmur
 ```
 
-(Adjust the path if you cloned Murmur somewhere other than `~/murmur`. Note the
-alias uses `python3`, not `python` — macOS venvs expose only `python3`.)
+This alias intentionally uses `.venv/bin/python`, not `python3`.
 
-## Tuning
+## Updating or rebuilding the Python environment
 
-Two knobs at the top of `murmur.py`:
-- **`CLEANUP_PROMPT`** — the heart of the tool. Adjust how aggressively it edits.
-- **`WHISPER_MODEL`** — `small.en` (default) balances speed and accuracy.
+If Murmur stops working after a Python or Homebrew update, rebuild the local
+environment with the pinned Python version:
 
-Want better cleanup or lower latency? Swap the local model for a cloud API —
-see the **ESCAPE HATCH** comment inside the `cleanup()` function. ~5-line change.
+```bash
+cd ~/murmur
+rm -rf .venv
+brew install python@3.12
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
 
-## The build story
+You do not need to download Ollama or the Ollama model again unless Ollama itself
+was removed.
 
-Murmur started as a "can I build the private version of a cloud dictation app in
-a weekend?" experiment. The interesting part wasn't the AI — it was the scoping
-decision that kept it small. Full writeup: **[link to your Substack post]**
+## Troubleshooting
+
+### `zsh: command not found: ollama`
+
+Ollama is not installed, or the command-line tool is not available.
+
+```bash
+brew install --cask ollama
+open -a Ollama
+which ollama
+ollama --version
+```
+
+### `could not connect to ollama server`
+
+Ollama is installed but not running.
+
+```bash
+open -a Ollama
+```
+
+Then retry:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+### `llama-server binary not found`
+
+The Homebrew Ollama install is probably broken. Do not try to compile Ollama with
+`cmake` unless you intentionally want to debug Ollama internals. Reinstall it:
+
+```bash
+brew uninstall ollama
+brew cleanup
+brew install --cask ollama
+open -a Ollama
+ollama pull llama3.1:8b
+```
+
+### Wrong Python version
+
+Check what Murmur is using:
+
+```bash
+cd ~/murmur
+.venv/bin/python --version
+.venv/bin/python -c "import sys; print(sys.executable)"
+```
+
+Expected: Python 3.12.x and a path ending in `~/murmur/.venv/bin/python`.
+
+### Microphone or hotkey permissions
+
+Go to **System Settings -> Privacy & Security** and grant your Terminal app:
+
+- Microphone
+- Input Monitoring
+- Accessibility
+
+Then quit and reopen Terminal.
+
+## Configuration
+
+Edit these constants near the top of `murmur.py`:
+
+- `HOTKEY` — default is Right Option.
+- `WHISPER_MODEL` — default is `small.en`.
+- `WHISPER_COMPUTE` — default is `int8`.
+- `OLLAMA_MODEL` — default is `llama3.1:8b`.
+- `CLEANUP_PROMPT` — controls how aggressively Murmur cleans dictation.
+
+## Build story
+
+Murmur started as a weekend question: can a private version of a cloud dictation
+app be small enough to understand, modify, and trust?
+
+Full writeup: **[link to your Substack post]**
 
 ## Credits
 
