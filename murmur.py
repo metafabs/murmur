@@ -3,11 +3,11 @@
 Murmur — Local, private voice dictation with AI cleanup (macOS).
 The quiet, local alternative to cloud dictation. Your voice never leaves your machine.
 
-Pipeline:  hotkey hold -> record mic -> faster-whisper (local) -> Ollama cleanup (local) -> clipboard
+Pipeline:  tap hotkey -> record mic -> tap again -> faster-whisper (local) -> Ollama cleanup (local) -> clipboard
 
 Usage:
-    Hold the hotkey (default: right-Option / Alt) and speak.
-    Release to stop. Cleaned text lands on your clipboard.
+    Tap the hotkey once (default: right-Option / Alt) and speak.
+    Tap it again to stop. Cleaned text lands on your clipboard.
     Paste it yourself with Cmd-V.  (This is "Option B" — no paste-automation,
     no accessibility permissions, no debug spiral.)
 
@@ -31,7 +31,8 @@ from pynput import keyboard
 # ───────────────────────────────────────────────────────────────────────────
 
 # --- Hotkey -----------------------------------------------------------------
-# Hold this key to record. Right-Option is comfy and rarely used on macOS.
+# Tap once to record, then tap again to stop.
+# Right-Option is comfy and rarely used on macOS.
 # Other ideas: keyboard.Key.f13, keyboard.Key.alt_r (left Option = alt_l)
 HOTKEY = keyboard.Key.alt_r
 
@@ -76,8 +77,11 @@ Cleaned text:"""
 
 _audio_q: "queue.Queue[np.ndarray]" = queue.Queue()
 _recording = False
+_processing = False
+_hotkey_down = False
 _stream = None
 _model = None
+_state_lock = threading.Lock()
 
 
 def log(msg: str):
@@ -176,73 +180,104 @@ def _audio_callback(indata, frames, time_info, status):
 
 def start_recording():
     global _recording, _stream
-    if _recording:
+
+    with _state_lock:
+        if _recording:
+            return
+        if _processing:
+            log("still processing the previous take — wait for the clipboard confirmation.")
+            return
+
+        # Drain any stale audio before opening a new take.
+        while not _audio_q.empty():
+            _audio_q.get_nowait()
+        _recording = True
+
+    try:
+        stream = sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=CHANNELS,
+            dtype="float32",
+            callback=_audio_callback,
+        )
+        stream.start()
+        with _state_lock:
+            _stream = stream
+    except Exception as e:
+        with _state_lock:
+            _recording = False
+            _stream = None
+        log(f"could not start recording: {e}")
         return
-    # drain any stale audio
-    while not _audio_q.empty():
-        _audio_q.get_nowait()
-    _recording = True
-    _stream = sd.InputStream(
-        samplerate=SAMPLE_RATE, channels=CHANNELS,
-        dtype="float32", callback=_audio_callback,
-    )
-    _stream.start()
-    log("● recording… (release hotkey to stop)")
+
+    log("● recording… (tap Right-Option again to stop)")
 
 
 def stop_recording_and_process():
-    global _recording, _stream
-    if not _recording:
-        return
-    _recording = False
-    if _stream is not None:
-        _stream.stop()
-        _stream.close()
+    global _recording, _processing, _stream
+
+    with _state_lock:
+        if not _recording or _processing:
+            return
+        _recording = False
+        _processing = True
+        stream = _stream
         _stream = None
 
-    # gather audio
-    chunks = []
-    while not _audio_q.empty():
-        chunks.append(_audio_q.get_nowait())
-    if not chunks:
-        log("no audio captured.")
-        return
-    audio = np.concatenate(chunks, axis=0).flatten().astype(np.float32)
-    dur = len(audio) / SAMPLE_RATE
-    if dur < 0.3:
-        log("too short, ignored.")
-        return
-    log(f"transcribing {dur:.1f}s…")
+    try:
+        if stream is not None:
+            stream.stop()
+            stream.close()
 
-    t0 = time.time()
-    segments, _ = _model.transcribe(audio, language=WHISPER_LANGUAGE, beam_size=5)
-    raw = " ".join(s.text.strip() for s in segments).strip()
-    log(f"raw ({time.time()-t0:.1f}s): {raw!r}")
+        # Gather audio.
+        chunks = []
+        while not _audio_q.empty():
+            chunks.append(_audio_q.get_nowait())
+        if not chunks:
+            log("no audio captured.")
+            return
 
-    if not raw:
-        log("empty transcription.")
-        return
+        audio = np.concatenate(chunks, axis=0).flatten().astype(np.float32)
+        dur = len(audio) / SAMPLE_RATE
+        if dur < 0.3:
+            log("too short, ignored.")
+            return
+        log(f"transcribing {dur:.1f}s…")
 
-    # Heads-up on long inputs: cleanup quality degrades and latency climbs as the
-    # transcript grows. ~750 words (~1000 tokens) is a comfortable ceiling for the
-    # 8B model with num_ctx=8192. Beyond that, consider dictating in shorter bursts.
-    word_count = len(raw.split())
-    if word_count > 750:
-        log(f"⚠ long transcript ({word_count} words) — cleanup may be slow or "
-            f"truncated. If output looks cut off, dictate in shorter bursts.")
+        t0 = time.time()
+        segments, _ = _model.transcribe(audio, language=WHISPER_LANGUAGE, beam_size=5)
+        raw = " ".join(s.text.strip() for s in segments).strip()
+        log(f"raw ({time.time()-t0:.1f}s): {raw!r}")
 
-    final = raw
-    if CLEANUP_ENABLED:
-        try:
-            t1 = time.time()
-            final = cleanup(raw)
-            log(f"cleaned ({time.time()-t1:.1f}s): {final!r}")
-        except Exception as e:
-            log(f"cleanup failed ({e}); falling back to raw text.")
-            final = raw
+        if not raw:
+            log("empty transcription.")
+            return
 
-    pyperclip.copy(final)
-    log("✔ on clipboard — press Cmd-V to paste.\n")
+        # Heads-up on long inputs: cleanup quality degrades and latency climbs as the
+        # transcript grows. ~750 words (~1000 tokens) is a comfortable ceiling for the
+        # 8B model with num_ctx=8192. Beyond that, consider dictating in shorter bursts.
+        word_count = len(raw.split())
+        if word_count > 750:
+            log(f"⚠ long transcript ({word_count} words) — cleanup may be slow or "
+                f"truncated. If output looks cut off, dictate in shorter bursts.")
+
+        final = raw
+        if CLEANUP_ENABLED:
+            try:
+                t1 = time.time()
+                final = cleanup(raw)
+                log(f"cleaned ({time.time()-t1:.1f}s): {final!r}")
+            except Exception as e:
+                log(f"cleanup failed ({e}); falling back to raw text.")
+                final = raw
+
+        pyperclip.copy(final)
+        log("✔ on clipboard — press Cmd-V to paste.\n")
+    except Exception as e:
+        log(f"processing failed: {e}")
+    finally:
+        with _state_lock:
+            _processing = False
 
 
 def cleanup(transcript: str) -> str:
@@ -276,17 +311,36 @@ def cleanup(transcript: str) -> str:
     return r.json()["response"].strip()
 
 
-# ─── Hotkey handling (hold-to-talk) ─────────────────────────────────────────
+# ─── Hotkey handling (tap-to-toggle) ────────────────────────────────────────
 
 def on_press(key):
-    if key == HOTKEY:
+    global _hotkey_down
+
+    if key != HOTKEY:
+        return
+
+    # pynput can emit repeated press events while a key is physically held.
+    # Treat one physical press as one toggle, then re-arm on release.
+    with _state_lock:
+        if _hotkey_down:
+            return
+        _hotkey_down = True
+        is_recording = _recording
+
+    if is_recording:
+        # Process in a thread so the listener is not blocked.
+        threading.Thread(target=stop_recording_and_process, daemon=True).start()
+    else:
         start_recording()
 
 
 def on_release(key):
+    global _hotkey_down
+
     if key == HOTKEY:
-        # process in a thread so the listener isn't blocked
-        threading.Thread(target=stop_recording_and_process, daemon=True).start()
+        with _state_lock:
+            _hotkey_down = False
+
     if key == keyboard.Key.esc:
         log("esc pressed — exiting.")
         return False  # stops listener
@@ -322,8 +376,8 @@ def main():
     print_banner()
     load_model()
     print()
-    log(f"ready. hold [Right-Option ⌥] and speak. release to transcribe.")
-    log(f"then press [⌘V] to paste. press [Esc] to quit.")
+    log("ready. tap [Right-Option ⌥] once to record, then tap it again to transcribe.")
+    log("then press [⌘V] to paste. press [Esc] to quit.")
     log(f"cleanup: {'ON (' + OLLAMA_MODEL + ')' if CLEANUP_ENABLED else 'OFF (raw text)'}")
     log("note: if you see a 'process is not trusted' message below, macOS needs")
     log("      permission — grant your terminal app Input Monitoring + Accessibility")
