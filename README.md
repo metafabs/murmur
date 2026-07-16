@@ -2,7 +2,7 @@
 
 **Dictation that stays on your machine. The quiet, local alternative to cloud dictation.**
 
-Murmur lets you hold a hotkey, speak, and get clean, filler-free text on your
+Murmur lets you tap a hotkey, speak, tap again, and get clean, filler-free text on your
 clipboard — with transcription *and* AI cleanup running entirely on your own Mac.
 No cloud, no subscription, no audio leaving your computer.
 
@@ -14,7 +14,7 @@ No cloud, no subscription, no audio leaving your computer.
 ## What Murmur does
 
 ```
-hold hotkey -> record mic -> faster-whisper locally -> Ollama cleanup locally -> clipboard -> Cmd-V
+tap hotkey -> record mic -> tap again -> faster-whisper locally -> Ollama cleanup locally -> clipboard -> Cmd-V
 ```
 
 - **Transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper), local.
@@ -84,8 +84,9 @@ cd ~/murmur
 .venv/bin/python murmur.py
 ```
 
-Hold **Right Option**, speak, release. When Murmur says the text is on your
-clipboard, paste with **Cmd-V**. Press **Esc** to quit.
+Tap **Right Option** once and speak. Tap **Right Option** again to stop and
+transcribe. When Murmur says the text is on your clipboard, paste with **Cmd-V**.
+Press **Esc** to quit.
 
 On first launch, Murmur downloads the Whisper transcription model. macOS may ask
 for privacy permissions. Grant your Terminal app:
@@ -195,7 +196,7 @@ Then quit and reopen Terminal.
 
 Edit these constants near the top of `murmur.py`:
 
-- `HOTKEY` — default is Right Option.
+- `HOTKEY` — default is Right Option; tap once to start and tap again to stop.
 - `WHISPER_MODEL` — default is `small.en`.
 - `WHISPER_COMPUTE` — default is `int8`.
 - `OLLAMA_MODEL` — default is `llama3.1:8b`.
